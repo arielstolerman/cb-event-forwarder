@@ -304,7 +304,7 @@ func messageProcessingLoop(uri, queueName, consumerTag string) error {
 
 func startOutputs() error {
 	// Configure the specific output.
-	// Valid options are: 'udp', 'tcp', 'file', 's3', 'syslog'
+	// Valid options are: 'udp', 'tcp', 'file', 's3', 'syslog', 'pubsub'
 	var outputHandler OutputHandler
 
 	parameters := config.OutputParameters
@@ -324,6 +324,8 @@ func startOutputs() error {
 		outputHandler = &SyslogOutput{}
 	case HttpOutputType:
 		outputHandler = &BundledOutput{behavior: &HttpBehavior{}}
+	case PubSubOutputType:
+		outputHandler = &PubSubOutput{}
 	default:
 		return errors.New(fmt.Sprintf("No valid output handler found (%d)", config.OutputType))
 	}
@@ -355,6 +357,8 @@ func startOutputs() error {
 			ret["type"] = "s3"
 		case HttpOutputType:
 			ret["type"] = "http"
+		case PubSubOutputType:
+			ret["type"] = "pubsub"
 		}
 
 		return ret

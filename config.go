@@ -13,6 +13,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"google.golang.org/cloud/pubsub"
 )
 
 const (
@@ -22,6 +23,7 @@ const (
 	UDPOutputType
 	SyslogOutputType
 	HttpOutputType
+	PubSubOutputType
 )
 
 const (
@@ -30,54 +32,58 @@ const (
 )
 
 type Configuration struct {
-	ServerName           string
-	AMQPHostname         string
-	DebugFlag            bool
-	OutputType           int
-	OutputFormat         int
-	AMQPUsername         string
-	AMQPPassword         string
-	AMQPPort             int
-	AMQPTLSEnabled       bool
-	AMQPTLSClientKey     string
-	AMQPTLSClientCert    string
-	AMQPTLSCACert        string
-	OutputParameters     string
-	EventTypes           []string
-	HTTPServerPort       int
-	CbServerURL          string
-	UseRawSensorExchange bool
+	ServerName                string
+	AMQPHostname              string
+	DebugFlag                 bool
+	OutputType                int
+	OutputFormat              int
+	AMQPUsername              string
+	AMQPPassword              string
+	AMQPPort                  int
+	AMQPTLSEnabled            bool
+	AMQPTLSClientKey          string
+	AMQPTLSClientCert         string
+	AMQPTLSCACert             string
+	OutputParameters          string
+	EventTypes                []string
+	HTTPServerPort            int
+	CbServerURL               string
+	UseRawSensorExchange      bool
 
 	// this is a hack for S3 specific configuration
-	S3ServerSideEncryption  *string
-	S3CredentialProfileName *string
-	S3ACLPolicy             *string
-	S3ObjectPrefix          *string
+	S3ServerSideEncryption    *string
+	S3CredentialProfileName   *string
+	S3ACLPolicy               *string
+	S3ObjectPrefix            *string
 
 	// Syslog-specific configuration
-	TLSClientKey  *string
-	TLSClientCert *string
-	TLSCACert     *string
-	TLSVerify     bool
+	TLSClientKey              *string
+	TLSClientCert             *string
+	TLSCACert                 *string
+	TLSVerify                 bool
 
 	// HTTP-specific configuration
-	HttpAuthorizationToken *string
-	HttpPostTemplate       *template.Template
-	HttpContentType        *string
+	HttpAuthorizationToken    *string
+	HttpPostTemplate          *template.Template
+	HttpContentType           *string
+
+	// Google Cloud Engine PubSub specific configuration
+	PubSubPublishSettings     *pubsub.PublishSettings
+	CreateTopicIfMissing	 bool
 
 	// configuration options common to bundled outputs (S3, HTTP)
-	UploadEmptyFiles    bool
-	CommaSeparateEvents bool
-	BundleSendTimeout   time.Duration
-	BundleSizeMax       int64
+	UploadEmptyFiles          bool
+	CommaSeparateEvents       bool
+	BundleSendTimeout         time.Duration
+	BundleSizeMax             int64
 
-	TLSConfig *tls.Config
+	TLSConfig                 *tls.Config
 
 	// optional post processing of feed hits to retrieve titles
 	PerformFeedPostprocessing bool
 	CbAPIToken                string
 	CbAPIVerifySSL            bool
-	CbAPIProxyUrl	          string
+	CbAPIProxyUrl             string
 }
 
 type ConfigurationError struct {
@@ -369,6 +375,53 @@ func ParseConfig(fn string) (Configuration, error) {
 		case "syslog":
 			parameterKey = "syslogout"
 			config.OutputType = SyslogOutputType
+		case "pubsub":
+			parameterKey = "pubsubout"
+			config.OutputType = PubSubOutputType
+			config.PubSubPublishSettings = new(pubsub.PublishSettings)
+			*config.PubSubPublishSettings = pubsub.DefaultPublishSettings
+			str, ok := input.Get("pubsub", "delay_threshold_ms")
+			if ok {
+				val, err := strconv.Atoi(str)
+				if err != nil && val > 0 {
+					config.PubSubPublishSettings.DelayThreshold = val * time.Millisecond
+				}
+			}
+			str, ok = input.Get("pubsub", "count_threshold")
+			if ok {
+				val, err := strconv.Atoi(str)
+				if err != nil && val > 0 && val <= 1000 {
+					config.PubSubPublishSettings.CountThreshold = val
+				}
+			}
+			str, ok = input.Get("pubsub", "byte_threshold")
+			if ok {
+				val, err := strconv.Atoi(str)
+				if err != nil && val > 0  {
+					config.PubSubPublishSettings.ByteThreshold = val
+				}
+			}
+			str, ok = input.Get("pubsub", "buffered_byte_limit")
+			if ok {
+				val, err := strconv.Atoi(str)
+				if err != nil && val > 0  {
+					config.PubSubPublishSettings.BufferedByteLimit = val
+				}
+			}
+			str, ok = input.Get("pubsub", "num_goroutines")
+			if ok {
+				val, err := strconv.Atoi(str)
+				if err != nil && val > 0  {
+					config.PubSubPublishSettings.NumGoroutines = val
+				}
+			}
+			str, ok = input.Get("pubsub", "create_topic_if_missing")
+			if ok {
+				b, err := strconv.ParseBool(str)
+				if err != nil {
+					config.CreateTopicIfMissing = b
+				}
+			}
 		default:
 			errs.addErrorString(fmt.Sprintf("Unknown output type: %s", outType))
 		}
