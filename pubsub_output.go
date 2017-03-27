@@ -1,32 +1,25 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
-	"net"
 	"os"
 	"os/signal"
 	"regexp"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
-	"encoding/json"
 
+	"cloud.google.com/go/pubsub"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/compute/v1"
-	"google.golang.org/api/option"
-	"google.golang.org/cloud/pubsub"
 )
 
 type PubSubOutput struct {
-	ctx               context.Context
-	client            *pubsub.Client
-	topic             *pubsub.Topic
+	ctx    context.Context
+	client *pubsub.Client
+	topic  *pubsub.Topic
 
 	//connectTime                 time.Time
 	//reconnectTime               time.Time
@@ -39,7 +32,7 @@ type PubSubOutput struct {
 
 type PubSubStatistics struct {
 	Topic             string `json:"topic"`
-	DroppedEventCount int64     `json:"dropped_event_count"`
+	DroppedEventCount int64  `json:"dropped_event_count"`
 }
 
 // Initialize() expects a config string in the following format:
@@ -49,16 +42,12 @@ type PubSubStatistics struct {
 // using Google application credentials at /root/google/credentials.json
 func (o *PubSubOutput) Initialize(configStr string) error {
 	// Validate and set config fields
-	if configStr == nil {
-		return errors.New("Missing pubsubout configuration")
-	}
 	parts := strings.SplitN(configStr, ":", 3)
-	if len(parts) != 3 {
-		return errors.New(fmt.Sprintf("Expecting 3 colon-deparated values in pubsubout, got: %v", cnf))
+	if len(parts) != 2 {
+		return errors.New(fmt.Sprintf("Expecting 2 colon-deparated values in pubsubout, got: %v", configStr))
 	}
 	projectID := parts[0]
 	topicName := parts[1]
-	credsPath := parts[2]
 
 	regex := `[a-z][a-z0-9]*(-[a-z0-9]+)*`
 	if !regexp.MustCompile(regex).MatchString(projectID) {
@@ -68,10 +57,17 @@ func (o *PubSubOutput) Initialize(configStr string) error {
 	if !regexp.MustCompile(regex).MatchString(topicName) {
 		return errors.New(fmt.Sprintf("Invalid PubSub topic name %s, must match: %s", topicName, regex))
 	}
-	if _, err := os.Stat(credsPath); os.IsNotExist(err) {
-		return errors.New(fmt.Sprintf("Google credentials file '%s' does not exist", credsPath))
+
+	var credsPath string
+	if config.PubSubGoogleAppCreds != nil {
+		credsPath = *config.PubSubGoogleAppCreds
+		os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", credsPath)
+	} else {
+		credsPath = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 	}
-	os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", credsPath)
+	if _, err := os.Stat(credsPath); err != nil {
+		return errors.New(fmt.Sprintf("Error reading Google credentials file '%s': %v", credsPath, err))
+	}
 
 	// Create the PubSub client
 	o.ctx = oauth2.NoContext
@@ -88,7 +84,7 @@ func (o *PubSubOutput) Initialize(configStr string) error {
 		return errors.New(fmt.Sprintf("Failed to check if PubSub topic %s exists: %v", topicName, err))
 	}
 	if !ok {
-		if config.CreateTopicIfMissing {
+		if config.PubSubCreateTopicIfMissing {
 			topic, err := client.CreateTopic(context.Background(), topicName)
 			if err != nil {
 				return errors.New(fmt.Sprintf("Failed to create PubSub topic %s: %v", topicName,
@@ -114,7 +110,7 @@ func (o *PubSubOutput) String() string {
 
 func (o *PubSubOutput) Statistics() interface{} {
 	return PubSubStatistics{
-		Topic: o.topic.String(),
+		Topic:             o.topic.String(),
 		DroppedEventCount: o.droppedEventCount,
 	}
 }
@@ -131,7 +127,7 @@ func (o *PubSubOutput) output(m string) error {
 	return err
 }
 
-func (o *PubSubOutput) Go(messages <-chan string, errorChan chan <- error) error {
+func (o *PubSubOutput) Go(messages <-chan string, errorChan chan<- error) error {
 	go func() {
 		hup := make(chan os.Signal, 1)
 		signal.Notify(hup, syscall.SIGHUP)
@@ -142,7 +138,6 @@ func (o *PubSubOutput) Go(messages <-chan string, errorChan chan <- error) error
 				errorChan <- err
 			}
 		}
-
 	}()
 	return nil
 }

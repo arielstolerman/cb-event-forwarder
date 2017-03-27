@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cloud.google.com/go/pubsub"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -13,7 +14,6 @@ import (
 	"strings"
 	"text/template"
 	"time"
-	"google.golang.org/cloud/pubsub"
 )
 
 const (
@@ -32,52 +32,53 @@ const (
 )
 
 type Configuration struct {
-	ServerName                string
-	AMQPHostname              string
-	DebugFlag                 bool
-	OutputType                int
-	OutputFormat              int
-	AMQPUsername              string
-	AMQPPassword              string
-	AMQPPort                  int
-	AMQPTLSEnabled            bool
-	AMQPTLSClientKey          string
-	AMQPTLSClientCert         string
-	AMQPTLSCACert             string
-	OutputParameters          string
-	EventTypes                []string
-	HTTPServerPort            int
-	CbServerURL               string
-	UseRawSensorExchange      bool
+	ServerName           string
+	AMQPHostname         string
+	DebugFlag            bool
+	OutputType           int
+	OutputFormat         int
+	AMQPUsername         string
+	AMQPPassword         string
+	AMQPPort             int
+	AMQPTLSEnabled       bool
+	AMQPTLSClientKey     string
+	AMQPTLSClientCert    string
+	AMQPTLSCACert        string
+	OutputParameters     string
+	EventTypes           []string
+	HTTPServerPort       int
+	CbServerURL          string
+	UseRawSensorExchange bool
 
 	// this is a hack for S3 specific configuration
-	S3ServerSideEncryption    *string
-	S3CredentialProfileName   *string
-	S3ACLPolicy               *string
-	S3ObjectPrefix            *string
+	S3ServerSideEncryption  *string
+	S3CredentialProfileName *string
+	S3ACLPolicy             *string
+	S3ObjectPrefix          *string
 
 	// Syslog-specific configuration
-	TLSClientKey              *string
-	TLSClientCert             *string
-	TLSCACert                 *string
-	TLSVerify                 bool
+	TLSClientKey  *string
+	TLSClientCert *string
+	TLSCACert     *string
+	TLSVerify     bool
 
 	// HTTP-specific configuration
-	HttpAuthorizationToken    *string
-	HttpPostTemplate          *template.Template
-	HttpContentType           *string
+	HttpAuthorizationToken *string
+	HttpPostTemplate       *template.Template
+	HttpContentType        *string
 
 	// Google Cloud Engine PubSub specific configuration
-	PubSubPublishSettings     *pubsub.PublishSettings
-	CreateTopicIfMissing	 bool
+	PubSubPublishSettings      *pubsub.PublishSettings
+	PubSubGoogleAppCreds       *string
+	PubSubCreateTopicIfMissing bool
 
 	// configuration options common to bundled outputs (S3, HTTP)
-	UploadEmptyFiles          bool
-	CommaSeparateEvents       bool
-	BundleSendTimeout         time.Duration
-	BundleSizeMax             int64
+	UploadEmptyFiles    bool
+	CommaSeparateEvents bool
+	BundleSendTimeout   time.Duration
+	BundleSizeMax       int64
 
-	TLSConfig                 *tls.Config
+	TLSConfig *tls.Config
 
 	// optional post processing of feed hits to retrieve titles
 	PerformFeedPostprocessing bool
@@ -207,8 +208,13 @@ func ParseConfig(fn string) (Configuration, error) {
 	config.S3ServerSideEncryption = nil
 	config.S3CredentialProfileName = nil
 
+	config.PubSubPublishSettings = nil
+	config.PubSubGoogleAppCreds = nil
+	config.PubSubCreateTopicIfMissing = false
+
 	// required values
-	val, ok := input.Get("bridge", "server_name")
+	val, ok :=
+		input.Get("bridge", "server_name")
 	if !ok {
 		config.ServerName = "CB"
 	} else {
@@ -384,7 +390,8 @@ func ParseConfig(fn string) (Configuration, error) {
 			if ok {
 				val, err := strconv.Atoi(str)
 				if err != nil && val > 0 {
-					config.PubSubPublishSettings.DelayThreshold = val * time.Millisecond
+					config.PubSubPublishSettings.DelayThreshold =
+						time.Duration(val) * time.Millisecond
 				}
 			}
 			str, ok = input.Get("pubsub", "count_threshold")
@@ -397,21 +404,21 @@ func ParseConfig(fn string) (Configuration, error) {
 			str, ok = input.Get("pubsub", "byte_threshold")
 			if ok {
 				val, err := strconv.Atoi(str)
-				if err != nil && val > 0  {
+				if err != nil && val > 0 {
 					config.PubSubPublishSettings.ByteThreshold = val
 				}
 			}
 			str, ok = input.Get("pubsub", "buffered_byte_limit")
 			if ok {
 				val, err := strconv.Atoi(str)
-				if err != nil && val > 0  {
+				if err != nil && val > 0 {
 					config.PubSubPublishSettings.BufferedByteLimit = val
 				}
 			}
 			str, ok = input.Get("pubsub", "num_goroutines")
 			if ok {
 				val, err := strconv.Atoi(str)
-				if err != nil && val > 0  {
+				if err != nil && val > 0 {
 					config.PubSubPublishSettings.NumGoroutines = val
 				}
 			}
@@ -419,8 +426,12 @@ func ParseConfig(fn string) (Configuration, error) {
 			if ok {
 				b, err := strconv.ParseBool(str)
 				if err != nil {
-					config.CreateTopicIfMissing = b
+					config.PubSubCreateTopicIfMissing = b
 				}
+			}
+			str, ok = input.Get("pubsub", "google_app_creds_path")
+			if ok {
+				config.PubSubGoogleAppCreds = &str
 			}
 		default:
 			errs.addErrorString(fmt.Sprintf("Unknown output type: %s", outType))
