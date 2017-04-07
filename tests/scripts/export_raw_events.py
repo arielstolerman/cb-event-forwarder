@@ -15,7 +15,7 @@ g_config = {}
 
 
 class EventOutput(object):
-    DESTINATIONS = ['udp', 'tcp', 'file', 'stdout', 's3']
+    DESTINATIONS = ['udp', 'tcp', 'file', 'stdout', 's3', 'pubsub']
 
     def __init__(self, out_dest):
 

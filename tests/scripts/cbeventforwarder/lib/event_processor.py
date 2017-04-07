@@ -9,12 +9,13 @@ import sys
 import boto
 
 from event_parser import EventParser
+from google.cloud import pubsub
 
 LOGGER = logging.getLogger(__name__)
 
 
 class EventOutput(object):
-    OUTPUT_TYPES = ["udp", "tcp", "file", "stdout", "s3"]
+    OUTPUT_TYPES = ["udp", "tcp", "file", "stdout", "s3", "pubsub"]
 
     def __init__(self, output_type):
 
@@ -146,6 +147,30 @@ class TcpOutput(EventOutput):
             sock.close()
         except:
             LOGGER.exception("Unable to output event via TCP")
+
+
+class PubSubOutput(EventOutput):
+    def __init__(self, project_id, topic_name):
+        super(S3Output, self).__init__('pubsub')
+
+        client = pubsub.Client(project=project_id)
+        self.topic = client.topic(topic_name)
+        if not self.topic.exists():
+            LOGGER.error("PubSub topic '{}' not found" % topic_name)
+            self.init = False
+        self.init = True
+
+    def write(self, event_data):
+        if not self.init:
+            LOGGER.error("PubSub client did not initialize successfully")
+            return
+        data = str(event_data).encode("utf-8")
+        try:
+            mid = self.topic.publish(data)
+        except:
+            LOGGER.exception("Unable to output event via PubSub")
+            return
+        LOGGER.info("pubsub published message id: {}" % mid)
 
 
 class S3Output(EventOutput):
